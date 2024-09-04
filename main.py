@@ -24,7 +24,7 @@ for chunk in chunks:
     
     chunk = Image.fromarray(chunk)
 
-    chunk = transforms(chunk).to(DEVICE)
+    chunk = transforms(chunk)
 
     tensor_chunks.append(chunk)
 
