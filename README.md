@@ -1,0 +1,1 @@
+# telegram-russian-ocr
