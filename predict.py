@@ -50,16 +50,29 @@ def Visualize_predictions(model, data, test=False):
             plt.imshow(exp[0][0].permute(2, 1, 0).permute(1, 0, 2))
             plt.title('true:' + exp[1][0] + '\npred:' + exp[2][0], loc = 'left')
     else:
-        pred_label = Predict(model, data)
-        predictions = [data, pred_label]
+        all_data = []
+        all_pred_labels = []
+        
+        for chunked_row in data:
+            pred_label = Predict(model, chunked_row) 
+            all_data.append(chunked_row)
+            all_pred_labels.append(pred_label)
 
-        fig = plt.figure(figsize=(10, 10))
-        rows = int(data.size()[0]/2)
-        columns = 2
+        all_data = torch.cat(all_data, dim=0) 
+        all_pred_labels = sum(all_pred_labels, []) 
 
-        for i in range(data.size()[0]):
+        num_images = all_data.size(0)
+        columns = 2 
+        rows = (num_images + 1) // columns  
 
+        fig = plt.figure(figsize=(20, 20))
+
+        for i in range(num_images):
+        
             fig.add_subplot(rows, columns, i + 1)
+            plt.imshow(all_data[i].permute(2, 1, 0).permute(1, 0, 2))  
+            plt.title('pred: ' + all_pred_labels[i], loc='left')
+            plt.axis('off')  
 
-            plt.imshow(predictions[0][i].permute(2, 1, 0).permute(1, 0, 2))
-            plt.title('pred:' + predictions[1][i], loc = 'left')
+        plt.tight_layout()  
+        plt.show()

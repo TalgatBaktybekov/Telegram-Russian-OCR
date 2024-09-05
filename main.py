@@ -10,34 +10,45 @@ import torch
 
 ALPHABET = os.environ['russianALPHABET']
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+print(os.environ)
+PROMPT = os.environ['PROMPT']
+
 model = Model(256, len(ALPHABET) + 1)
 model.to(DEVICE)
 model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'CNNLstm.pt'), weights_only=False, map_location=DEVICE))
 
-image = cv2.imread('/Users/talgatbaktybekov/Desktop/pet projects/telegram-russian-ocr/test2.jpeg')
+image = cv2.imread('/Users/talgatbaktybekov/Desktop/OCRRussian/test2.jpeg')
 
-chunks = ChunkImage(image)
-tensor_chunks = []
+chunked_rows = ChunkImage(image)
+
+tensored_chunked_rows = []
+
+text = ''
+
 transforms = transforms.Compose(TransformList().transform_list)
 
-for chunk in chunks:
-    
-    chunk = Image.fromarray(chunk)
+for row in chunked_rows:
 
-    chunk = transforms(chunk)
+    tensor_chunks = []
 
-    tensor_chunks.append(chunk)
+    for chunk in row:
+        
+        chunk = Image.fromarray(chunk)
 
-tensor_chunks = torch.stack(tensor_chunks)
+        chunk = transforms(chunk)
 
-Visualize_predictions(model, tensor_chunks)
+        tensor_chunks.append(chunk)
 
-# output = ''
+    tensor_chunks = torch.stack(tensor_chunks)
+    tensored_chunked_rows.append(tensor_chunks)
 
-# for prediction in predictions:
-#     output += prediction 
+    predictions = Predict(model, tensor_chunks)
 
-# print(output)
+    text += ' '.join(predictions) + '\n'
+
+llm = 
+
+print(llm.invoke(PROMPT+text))
 
 
 

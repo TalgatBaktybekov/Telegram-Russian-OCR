@@ -160,34 +160,56 @@ def process(image_raw, vertical=False):
 
 def ChunkImage(image_raw):
 
+    image_raw = trimmer(trimmer(image_raw, vertical=False), vertical=True)
     _, hor_lines = process(image_raw)
 
-    chunks = []
+    chunked_rows = []
 
-    for i in range(len(hor_lines)):
+    if image_raw.shape[1] <= 256:
+        return chunks.append(image_raw)
+    
+    if len(hor_lines) > 2:
 
-        if i == len(hor_lines) - 1:
+        differences = [hor_lines[i+1] - hor_lines[i] for i in range(len(hor_lines) - 1)]
+        
+        avg_diff = sum(differences) / len(differences)
+        
+        half_avg_diff = avg_diff / 2
 
-            row = image_raw[hor_lines[i]:]
-            row = trimmer(row, vertical=True)
-            row = trimmer(row, vertical=False)
+        result = [hor_lines[0]]  
+    
+        for i in range(1, len(hor_lines)):
+            if i == len(hor_lines) - 2 and abs(differences[i]) <= half_avg_diff:
+                result.append(image_raw.shape[0])
+                break
+            elif i == len(hor_lines) - 1 or abs(differences[i-1]) >= half_avg_diff:
+                result.append(hor_lines[i])
+        hor_lines = result
 
-            _, ver_lines = process(row, vertical=True)
+    for i in range(len(hor_lines)-1):
 
-        else:
+        chunks = ['']
+        
+        width = image_raw[hor_lines[i]:].shape[1]
 
-            row = image_raw[hor_lines[i]:hor_lines[i+1]]
-            row = trimmer(row, vertical=True)
-            row = trimmer(row, vertical=False)
+        row = image_raw[hor_lines[i]:hor_lines[i+1]]
+        row = trimmer(row, vertical=True)
+        row = trimmer(row, vertical=False)
 
-            _, ver_lines = process(row, vertical=True)
+        _, ver_lines = process(row, vertical=True)
 
+        n_splits = math.ceil((width - 100)/256)
 
-        for i in range(0, len(ver_lines) - 1, 3):
-            
-            if i + 3 >= len(ver_lines)-1:
-                chunks.append(row[:, ver_lines[i]:, :])
+        step = max(1, int(len(ver_lines)/n_splits))
+
+        ver_lines.append(width)
+
+        for i in range(0, len(ver_lines)-1, step):
+
+            if i > 0 and row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :].shape[1] <= 100:
+                chunks[-1] = np.concatenate((chunks[-1], row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :]), axis=1)
             else:
-                chunks.append(row[:, ver_lines[i]:ver_lines[i+3], :])
+                chunks.append(row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :])
 
-    return chunks
+        chunked_rows.append(chunks[1:])
+    return chunked_rows
