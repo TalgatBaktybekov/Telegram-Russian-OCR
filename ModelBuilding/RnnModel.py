@@ -10,19 +10,26 @@ class BidirectionalLSTM(nn.Module):
 
     def __init__(self, nIn, nHidden, nOut):
 
+        """
+        Args:
+        - nIn: input size
+        - nHidden: hidden layer size 
+        - nOut: output size 
+        """
+
         super(BidirectionalLSTM, self).__init__()
 
         self.rnn = nn.LSTM(nIn, nHidden, bidirectional=True)
-        self.embedding = nn.Linear(nHidden * 2, nOut)
+        self.embedding = nn.Linear(nHidden * 2, nOut) # nHidden * 2 because LSTM is bidirectional 
 
     def forward(self, input):
 
         self.rnn.flatten_parameters()
         recurrent, _ = self.rnn(input)
-        T, b, h = recurrent.size()
-        t_rec = recurrent.view(T * b, h)
+        T, b, h = recurrent.size() # time steps, batch size, hidden units
+        t_rec = recurrent.view(T * b, h) # reshaping for linear input 
         output = self.embedding(t_rec)  # [T * b, nOut]
-        output = output.view(T, b, -1)
+        output = output.view(T, b, -1) # reshape back
 
         return output
 
@@ -31,7 +38,8 @@ class Model(nn.Module):
     def __init__(self, nHidden, num_classes):
 
         super(Model, self).__init__()
-
+        
+        # CNN for features extraction before passing to RNN
         self.conv0 = Conv2d(1, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         self.conv1 = Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         self.conv2 = Conv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
@@ -51,6 +59,7 @@ class Model(nn.Module):
 
         self.relu = ReLU()
 
+        # RNN 
         self.rnn = nn.Sequential(
             BidirectionalLSTM(nHidden*2, nHidden, nHidden),
             BidirectionalLSTM(nHidden, nHidden, num_classes))
@@ -58,6 +67,7 @@ class Model(nn.Module):
 
     def forward(self, src):
         
+        #CNN layers 
         x = self.pool0(self.relu(self.conv0(src)))
         x = self.pool1(self.relu(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
@@ -66,13 +76,13 @@ class Model(nn.Module):
         x = self.pool5(self.relu(self.conv5(x)))
         x = self.relu(self.bn6(self.conv6(x)))
 
-        b, c, h, w = x.size()
-        assert h == 1, "the height of conv must be 1"
-        x = x.squeeze(2) # [b, c, h*w]
-        x = x.permute(2, 0, 1)  # [h*w, b, c]
+        b, c, h, w = x.size() # b-batch size, c-channels (512 from conv6), h-height, w-width (t-time steps)
+        assert h == 1, "the height of conv must be 1 to pass to rnn" 
+        x = x.squeeze(2) # [b, c, w] # remove the dimension (h, which is 1)
+        x = x.permute(2, 0, 1)  # permute it to make suitable for the rnn
 
-        logits = self.rnn(x) # [h*w, b, num_classes]
-        output = torch.nn.functional.log_softmax(logits, 2)
+        logits = self.rnn(x) # [w, b, num_classes]
+        output = torch.nn.functional.log_softmax(logits, 2) # map the outputs to probabilities 
 
         return output
     

@@ -4,10 +4,12 @@ import torch
 from ModelBuilding.DataLoad import OCRdataset, Collator
 from ModelBuilding.TrainEvaluate import TransformList
 
+# Choose the data to display
 PATH_TO_TRAIN_IMGDIR = os.environ["PATH_TO_TRAIN_IMGDIR"]
 PATH_TO_TRAIN_LABELS = os.environ["PATH_TO_TRAIN_LABELS"]
 BATCH_SIZE = 8
 
+# import the transform list used for building data loader for model training and testing from TrainEvaluate.py
 transform_list = TransformList.transform_list
 
 dataset = OCRdataset(PATH_TO_TRAIN_IMGDIR, PATH_TO_TRAIN_LABELS, transform_list = transform_list)
@@ -28,6 +30,8 @@ for batch in train_loader:
 fig = plt.figure(figsize=(10, 10))
 rows =  2
 columns =  2
+
+# Display some sampples of training/testing data
 
 for j, exp in enumerate(examples):
 

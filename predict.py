@@ -11,7 +11,7 @@ def Predict(model, img):
     coder = LabelCoder(ALPHABET)
 
     logits = model(img.to(DEVICE))
-    logits = logits.contiguous().cpu()
+    logits = logits
 
     T, B, H = logits.size()
     pred_sizes = torch.LongTensor([T for i in range(B)])
@@ -23,7 +23,7 @@ def Predict(model, img):
 
     return sim_preds
 
-def Visualize_predictions(model, data, test=False):
+def VisualizePredict(model, data, test=False):
 
     predictions = []
     idx = 0

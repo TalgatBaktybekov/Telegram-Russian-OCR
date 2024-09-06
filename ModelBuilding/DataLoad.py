@@ -4,9 +4,13 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 from PIL import Image
 
+# Encoding strings and Decoding outputs 
+
 class LabelCoder(object):
 
     def __init__(self, alphabet):
+
+        # Encode the alphabet
 
         self.alphabet = alphabet
         self.char2idx = {}
@@ -17,6 +21,8 @@ class LabelCoder(object):
 
     def encode(self, text: str):
 
+        #Encode a text and return the results and the length of the text
+        
         length = []
         result = []
 
@@ -39,29 +45,36 @@ class LabelCoder(object):
 
     def decode(self, t, length, raw=False):
 
+        # for single word
         if length.numel() == 1:
             length = length[0]
             assert t.numel() == length, "text with length: {} does not match declared length: {}".format(t.numel(),
                                                                                                          length)
+            # raw mode for keeping consecutive repeated characters
             if raw:
                 return ''.join([self.alphabet[i - 1] for i in t])
+            
+            # non-raw mode for filtering consecutive repeated characters
             else:
                 char_list = []
                 for i in range(length):
                     if t[i] != 0 and (not (i > 0 and t[i - 1] == t[i])):
                         char_list.append(self.alphabet[t[i] - 1])
                 return ''.join(char_list)
+            
+        # for batch of words 
         else:
-            # batch mode
             assert t.numel() == length.sum(), "texts with length: {} does not match declared length: {}".format(
                 t.numel(), length.sum())
             texts = []
             index = 0
             for i in range(length.numel()):
                 l = length[i]
+                # passing each word to the first part of the 'decode' function (for single words)
                 texts.append(
                     self.decode(t[index:index + l], torch.IntTensor([l]), raw=raw))
                 index += l
+
             return texts
 
         
@@ -72,7 +85,11 @@ class OCRdataset(Dataset):
         super(OCRdataset, self).__init__()
 
         self.imgdir = path_to_imgdir
+
+        #change accordingly to the dataset 
         df = pd.read_csv(path_to_labels, sep = '\t', names = ['image_name', 'label'])
+
+        #drop nan values because they will cause a trouble when training a model (skipping samples due to nan values of predictions and ctc loss)
         df = df.dropna()
 
         self.image2label = [(self.imgdir + image, label) for image, label in zip(df['image_name'], df['label'])]
@@ -96,7 +113,7 @@ class OCRdataset(Dataset):
         item = {'idx' : index, 'img': img, 'label': label}
         return item
 
-
+# to form batches from an OCRDataset 
 class Collator(object):
     
     def __call__(self, batch):

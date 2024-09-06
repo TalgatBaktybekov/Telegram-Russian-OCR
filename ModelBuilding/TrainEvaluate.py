@@ -7,35 +7,40 @@ from textdistance import levenshtein as lev
 from torchvision.transforms import transforms
 from ModelBuilding.DataLoad import OCRdataset, Collator, LabelCoder
 from ModelBuilding.RnnModel import Model
+from predict import VisualizePredict
 
 ALPHABET = os.environ['russianALPHABET']
 PATH_TO_TRAIN_IMGDIR = os.environ["PATH_TO_TRAIN_IMGDIR"]
 PATH_TO_TRAIN_LABELS = os.environ["PATH_TO_TRAIN_LABELS"]
 PATH_TO_TEST_IMGDIR = os.environ["PATH_TO_TEST_IMGDIR"]
 PATH_TO_TEST_LABELS = os.environ["PATH_TO_TRAIN_LABELS"]
+#change the device if needed
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 BATCH_SIZE = 8
 
 class CustomCTCLoss(torch.nn.Module):
 
-    # T x B x H => Softmax on dimension 2
+    # T x B x num_classes => Softmax on dimension 2
     def __init__(self, dim=2):
 
         super().__init__()
 
         self.dim = dim
-        self.ctc_loss = torch.nn.CTCLoss(reduction='mean', zero_infinity=True)
+        self.ctc_loss = torch.nn.CTCLoss(reduction='mean', zero_infinity=True) 
 
     def forward(self, logits, labels, prediction_sizes, target_sizes):
 
         loss = self.ctc_loss(logits, labels, prediction_sizes, target_sizes)
+        
+        # debug or sanitize if nans are occuring even though dropped nan data in OCRDataset 
 #       self.debug(loss, logits, labels, prediction_sizes, target_sizes)
         loss = self.sanitize(loss)
 
-        return self.debug(loss, logits, labels, prediction_sizes, target_sizes)
+        return loss
     
     def sanitize(self, loss):
-
+        
+        # replacing nan and too large loss values with 0 
         if abs(loss.item()) > 99999:
             return torch.zeros_like(loss, requires_grad = True)
         
@@ -46,6 +51,7 @@ class CustomCTCLoss(torch.nn.Module):
 
     def debug(self, loss, logits, labels, prediction_sizes, target_sizes):
 
+        # report nan values
         if math.isnan(loss.item()):
 
             print("Loss:", loss)
@@ -60,6 +66,8 @@ class CustomCTCLoss(torch.nn.Module):
 
     
 def print_epoch_data(epoch, mean_loss, char_error, word_error, time_elapsed, zero_out_losses):
+
+    #report epoch results 
 
     if epoch == 0:
         print('epoch | mean loss | mean cer | mean wer | time elapsed | warnings')
@@ -82,14 +90,14 @@ def print_epoch_data(epoch, mean_loss, char_error, word_error, time_elapsed, zer
     print(report_line)
     
     
-def fit(model, optimizer, loss_fn, loader, epochs = 64):
+def fit(model, optimizer, loss_fn, loader, epochs = 32):
 
     report = []
     coder = LabelCoder(ALPHABET)
 
     for epoch in range(epochs):
 
-        zero_out_losses = 0
+        zero_out_losses = 0 # count invalid losses
         start_time = time.time()
         model.train()
         outputs = []
@@ -98,15 +106,15 @@ def fit(model, optimizer, loss_fn, loader, epochs = 64):
 
             optimizer.zero_grad()
 
-            input_, targets = batch['img'], batch['label']
+            input, targets = batch['img'], batch['label']
 
             targets, lengths = coder.encode(targets)
-            logits = model(input_.to(DEVICE))
-            logits = logits.contiguous().cpu()
+            logits = model(input.to(DEVICE))
+            logits = logits
 
-            T, B, H = logits.size()
+            T, B, number_of_classes = logits.size()
             pred_sizes = torch.LongTensor([T for i in range(B)])
-            targets = targets.view(-1).contiguous()
+            targets = targets.view(-1)
             loss = loss_fn(logits, targets, pred_sizes, lengths)
 
             if (torch.zeros(loss.size()) == loss).all():
@@ -114,14 +122,17 @@ def fit(model, optimizer, loss_fn, loader, epochs = 64):
                 continue
 
             probs, preds = logits.max(2)
-            preds = preds.transpose(1, 0).contiguous().view(-1)
+            preds = preds.transpose(1, 0).view(-1)
             sim_preds = coder.decode(preds.data, pred_sizes.data, raw=False)
 
+            # try using levenshtein distance to calculate character error and word error
             try:
 
                 char_error = sum([lev(batch['label'][i], sim_preds[i])/max(len(batch['label'][i]), len(sim_preds[i])) for i in range(len(batch['label']))])/len(batch['label'])
                 word_error = 1 - sum([batch['label'][i] == sim_preds[i] for i in range(len(batch['label']))])/len(batch['label'])
 
+            # I was getting an error that I cannot pass float value to lev(), 
+            # so I decided to check var types and number of occurences in batch['label'] and sim_preds to debug
             except:
 
                 types1, types2 = dict(), dict()
@@ -131,6 +142,8 @@ def fit(model, optimizer, loss_fn, loader, epochs = 64):
                     if isinstance(batch['label'][i], float):
 
                         print(batch['label'][i], batch['img'][i])
+
+                        #wanted to see another sample from the batch
                         if i >= 1:
                             print(batch['label'][i-1], batch['img'][i-1])
                         else:
@@ -146,21 +159,21 @@ def fit(model, optimizer, loss_fn, loader, epochs = 64):
                     else:
                         types2[type(sim_preds[i])] = 1
 
-                print(f"""types1 {types1}, 
-                types2 {types2}""")
+                print(f"""var types in batch['label'] {types1}, 
+                var types in sim_preds {types2}""")
 
                 return
             
             loss.backward()
 
-            clip_grad_norm_(model.parameters(), 0.05)
+            clip_grad_norm_(model.parameters(), 0.05) # clipped the gradient to avoid large gradients
             optimizer.step()
 
             output = {'loss': abs(loss.item()),'cer': char_error,'wer': word_error}
             outputs.append(output)
 
         if len(outputs) == 0:
-            print('ERROR: bad loss, try to decrease learning rate and batch size')
+            print('All of the losses are nan, debug')
             return None
         
         end_time = time.time()
@@ -190,18 +203,18 @@ def evaluate(model, loader):
 
     for batch in loader:
 
-        input_, targets = batch['img'].to(DEVICE), batch['label']
+        input, targets = batch['img'].to(DEVICE), batch['label']
 
         labels.extend(targets)
         targets, _ = coder.encode(targets)
 
-        logits = model(input_)
-        logits = logits.contiguous().cpu()
+        logits = model(input)
+        logits = logits
 
         T, B, H = logits.size()
         pred_sizes = torch.LongTensor([T for i in range(B)])
         probs, pos = logits.max(2)
-        pos = pos.transpose(1, 0).contiguous().view(-1)
+        pos = pos.transpose(1, 0).view(-1)
 
         sim_preds = coder.decode(pos.data, pred_sizes.data, raw=False)
         predictions.extend(sim_preds)
@@ -211,6 +224,7 @@ def evaluate(model, loader):
 
     return {'char_error' : char_error, 'word_error' : word_error}
 
+# Make transforms_list as a class to export to other functions
 class TransformList():
 
     def __init__(self, transform_list=None):
@@ -223,7 +237,7 @@ class TransformList():
             transforms.Normalize((0.5,), (0.5,))
         ]
 
-if __name__ == 'main' :
+if __name__ == '__main__':
 
     transform_list = TransformList().transform_list
 
@@ -244,3 +258,5 @@ if __name__ == 'main' :
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = 2, collate_fn = collator)
 
     print("The results of the testing are: \n", evaluate(model, test_loader))
+
+    # VisualizePredict(model, test_loader, test=True)
