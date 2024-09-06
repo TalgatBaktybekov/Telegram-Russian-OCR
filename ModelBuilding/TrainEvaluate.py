@@ -2,12 +2,13 @@ import time
 import math
 import torch
 import os
+from matplotlib import pyplot as plt
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from textdistance import levenshtein as lev
 from torchvision.transforms import transforms
 from ModelBuilding.DataLoad import OCRdataset, Collator, LabelCoder
 from ModelBuilding.RnnModel import Model
-from predict import VisualizePredict
+
 
 ALPHABET = os.environ['russianALPHABET']
 PATH_TO_TRAIN_IMGDIR = os.environ["PATH_TO_TRAIN_IMGDIR"]
@@ -199,12 +200,13 @@ def fit(model, optimizer, loss_fn, loader, epochs = 32):
 def evaluate(model, loader):
 
     coder = LabelCoder(ALPHABET)
-    labels, predictions = [], []
+    images, labels, predictions =[], [], []
 
     for batch in loader:
 
         input, targets = batch['img'].to(DEVICE), batch['label']
 
+        images.append(batch['img'])
         labels.extend(targets)
         targets, _ = coder.encode(targets)
 
@@ -218,6 +220,17 @@ def evaluate(model, loader):
 
         sim_preds = coder.decode(pos.data, pred_sizes.data, raw=False)
         predictions.extend(sim_preds)
+
+    fig = plt.figure(figsize=(10, 10))
+    rows = 4
+    columns = 2
+
+    for i in range(rows+columns):
+
+        fig.add_subplot(rows, columns, i + 1)
+
+        plt.imshow(images[i].permute(1, 2, 0))
+        plt.title('true:' + labels[i] + '\npred:' + predictions[i], loc = 'left')
 
     char_error = sum([lev(labels[i], predictions[i])/max(len(labels[i]), len(predictions[i])) for i in range(len(labels))])/len(labels)
     word_error = 1 - sum([labels[i] == predictions[i] for i in range(len(labels))])/len(labels)
@@ -258,5 +271,3 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = 2, collate_fn = collator)
 
     print("The results of the testing are: \n", evaluate(model, test_loader))
-
-    # VisualizePredict(model, test_loader, test=True)

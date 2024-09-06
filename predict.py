@@ -1,10 +1,35 @@
 import os
 import torch 
-from ModelBuilding.DataLoad import LabelCoder
 import matplotlib.pyplot as plt
+import cv2
+from PIL import Image
+from torchvision.transforms import transforms
+from ModelBuilding.DataLoad import LabelCoder
+from ModelBuilding.RnnModel import Model
+from chunking import ChunkImage
+from ModelBuilding.TrainEvaluate import TransformList
+
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 ALPHABET = os.environ['russianALPHABET']
+PROMPT="""I have a text passage that may contain errors typical of handwritten word recognition, such as incorrect character substitutions, omissions, insertions, incorrect word boundaries, misinterpretations of handwriting variations, homophone confusion, contextual errors, poorly handwritten words, and issues with slant and orientation.
+
+Your task is to:
+
+Correct Character Substitutions: Fix any incorrect characters that were substituted for similar-looking ones.
+Address Character Omissions: Add any missing characters to complete the words.
+Fix Character Insertions: Remove any extra characters that do not belong in the words.
+Correct Word Boundaries: Properly split or merge words where necessary to accurately reflect the intended text.
+Adjust Handwriting Variations: Interpret and correct words that may have been misread due to handwriting style.
+Resolve Homophone Confusion: Replace incorrect words with the proper ones when homophones are confused.
+Fix Contextual Errors: Ensure that words fit the context of the sentence or passage.
+Improve Readability: Correct any issues caused by poorly handwritten words or irregularities.
+
+Please put the corrected text between @@ symbols like @'corrected text'@ 
+
+input:
+"""
+
 
 def Predict(model, img):
 
@@ -23,56 +48,84 @@ def Predict(model, img):
 
     return sim_preds
 
-def VisualizePredict(model, data, test=False):
+def VisualizePredict(model, data):
 
-    predictions = []
-    idx = 0
-    if test:
-        for batch in data:
+    # data: list of chunked rows (type: Tensors)
 
-            img, true_label = batch['img'], batch['label']
+    all_data = []
+    all_pred_labels = []
+    
+    for chunked_row in data:
+        pred_label = Predict(model, chunked_row)
+        pred_label[-1] += '\n'
+        all_data.append(chunked_row)
+        all_pred_labels.append(pred_label)
 
-            pred_label = Predict(model, img)
-            predictions.append([img, true_label, pred_label])
+    all_data = torch.cat(all_data, dim=0) 
+    all_pred_labels = sum(all_pred_labels, []) 
 
-            idx += 1
-            if idx == 8:
-                break
+    num_images = all_data.size(0)
+    columns = 2 
+    rows = (num_images + 1) // columns  
 
-        fig = plt.figure(figsize=(10, 10))
-        rows = 2
-        columns = 2
+    fig = plt.figure(figsize=(rows//2, int(1.3 * rows)))
+    
+    for i in range(num_images):
+    
+        ax = fig.add_subplot(rows, columns, i + 1)
+        ax.imshow(all_data[i].permute(1, 2, 0)) 
+        ax.set_xlabel('pred: ' + all_pred_labels[i], fontsize=7)  
+        ax.yaxis.set_visible(False) 
+        ax.tick_params(left=False, right=False, labelleft=False, labelbottom=False, bottom=False) 
 
-        for j, exp in enumerate(predictions):
+    plt.subplots_adjust(wspace=0.7, hspace=0.3)
+    plt.show()
 
-            fig.add_subplot(rows, columns, j + 1)
+    return ' '.join(all_pred_labels).replace('\n ', '\n')
 
-            plt.imshow(exp[0][0].permute(2, 1, 0).permute(1, 0, 2))
-            plt.title('true:' + exp[1][0] + '\npred:' + exp[2][0], loc = 'left')
-    else:
-        all_data = []
-        all_pred_labels = []
+def TranscribeImage(image, visualise=False):
+    
+    model = Model(256, len(ALPHABET) + 1)
+    model.to(DEVICE)
+    model.load_state_dict(torch.load(os.path.join(os.getcwd(), 'CNNLstm.pt'), weights_only=False, map_location=DEVICE))
+
+    # Split the image into chunks (hopefully clear, clean splittings of words)
+    chunked_rows = ChunkImage(image)
+
+    # tensors of the rows to pass to VisualisePredict()
+    tensored_chunked_rows = []
+
+    text = ''
+
+    transformator = transforms.Compose(TransformList().transform_list)
+
+    # Note the difference between input types of Predict and VisualisePredict 
+    #- Predict takes in one chunked row, while VisualisePredict takes in list of chunked rows when test=False, data loader when test=True
+    for row in chunked_rows:
+
+        tensor_chunks = []
+
+        for chunk in row:
+            
+            chunk = Image.fromarray(chunk)
+
+            chunk = transformator(chunk)
+
+            tensor_chunks.append(chunk)
+
+        tensor_chunks = torch.stack(tensor_chunks)
+        tensored_chunked_rows.append(tensor_chunks)
+
+        if not visualise:
+            predictions = Predict(model, tensor_chunks)
+
+            text += ' '.join(predictions) + '\n'
+
+    if visualise:
+       text = VisualizePredict(model, tensored_chunked_rows)
         
-        for chunked_row in data:
-            pred_label = Predict(model, chunked_row) 
-            all_data.append(chunked_row)
-            all_pred_labels.append(pred_label)
+    # llm = 'Some llm'
 
-        all_data = torch.cat(all_data, dim=0) 
-        all_pred_labels = sum(all_pred_labels, []) 
+    # text = llm.invoke(PROMPT+text).content.split('@')[0]
+    return text
 
-        num_images = all_data.size(0)
-        columns = 2 
-        rows = (num_images + 1) // columns  
-
-        fig = plt.figure(figsize=(20, 20))
-
-        for i in range(num_images):
-        
-            fig.add_subplot(rows, columns, i + 1)
-            plt.imshow(all_data[i].permute(2, 1, 0).permute(1, 0, 2))  
-            plt.title('pred: ' + all_pred_labels[i], loc='left')
-            plt.axis('off')  
-
-        plt.tight_layout()  
-        plt.show()
