@@ -3,6 +3,18 @@ import copy
 import math
 import numpy as np
 
+def exposure_contrast(image):
+    
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  
+
+    exposed_image = np.uint8(np.clip(image_gray * 2.0, 0, 255))
+
+    gamma = 1
+    inv_gamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(256)]).astype("uint8")
+
+    return cv2.LUT(exposed_image, table)
+
 # convert the image to black and white using threshold
 def ThresholdImage(image, threshold):
     
@@ -31,22 +43,28 @@ def ComputeOtsu(image, threshold):
 # compute all of the otsu values for and image and find the best threshold
 def FindThreshold(image):
     
-    th_range = range(np.max(image)+1)
+    th_range = range(int(np.max(image))+1)
     otsus = [ComputeOtsu(image, threshold) for threshold in th_range]
     best_one = th_range[np.argmin(otsus)]
     
     return best_one        
 
 # trim the image from both sides (bottom and top)/(right and left)
-def Trim(image, vertical=False):
+def Trim(image, vertical=False, rowFiltering=False):
     
     img = copy.deepcopy(image)
-    
-    white_density = FindThreshold(image)/255
 
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)/255
+    if rowFiltering: 
+        img = exposure_contrast(img)
 
-    _, img = cv2.threshold(img, white_density, 1, cv2.THRESH_BINARY)
+    white_density = FindThreshold(img)/255
+
+    if not rowFiltering:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)/255
+    else:
+        img = img/255
+
+    img = ThresholdImage(img, white_density)
     
     ax = 1 - vertical
     hist = img.shape[ax] - np.sum(img,axis=ax,keepdims=True)
@@ -54,6 +72,7 @@ def Trim(image, vertical=False):
     pixels = len(hist) 
     pixel1 = 0
     pixel2 = pixels - 1
+
     while pixel1 < pixels and hist[pixel1] == 0:
         pixel1 += 1
     while pixel2 >= 0 and hist[pixel2] == 0:
@@ -90,23 +109,27 @@ def HorFilter(arr):
 def VerFilter(row, ver_lines):
 
     width = row.shape[1]
+    ver_lines.append(width)
+
+    new_ver_lines = [ver_lines[0]]
+    for i in range(1, len(ver_lines)):
+        if row[:, new_ver_lines[-1]:ver_lines[min(i+1, len(ver_lines)-1)], :].shape[1] > 100:
+            new_ver_lines.append(ver_lines[i])
+
+    new_ver_lines.append(width)
+
+    ver_lines = new_ver_lines
 
     # splitting the row into chunks of the best size to pass to the model
     n_splits = math.ceil((width - 100)/256) # calculating the number of splits 
     step = max(1, int(len(ver_lines)/n_splits)) # calculating the number of lines to skip, to keep every step-th line 
     
-    ver_lines.append(width)
-
     # dummy head to avoid errors when accesing preceding elements in the list
     chunks = ['']
 
     # filtering the lines
     for i in range(0, len(ver_lines)-1, step):
-
-        if i > 0 and row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :].shape[1] <= 100:
-            chunks[-1] = np.concatenate((chunks[-1], row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :]), axis=1)
-        else:
-            chunks.append(row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :])
+        chunks.append(row[:, ver_lines[i]:ver_lines[min(i+step, len(ver_lines)-1)], :])
 
     return chunks[1:]
 
@@ -117,7 +140,7 @@ def Histogram(image_raw, vertical=False):
     
     white_density = FindThreshold(image_raw)/255
 
-    _, image = cv2.threshold(image, white_density, 1, cv2.THRESH_BINARY)
+    image = ThresholdImage(image, white_density)
     ax = 1 - vertical
     hist = image.shape[ax] - np.sum(image,axis=ax,keepdims=True)
     hist = hist.squeeze()
@@ -227,17 +250,14 @@ def ChunkImage(image_raw):
 
     # get the pixels of lines for text rows
     _, hor_lines = Process(image_raw)
-
+    
     # List of rows split into chunks(words)
     chunked_rows = []
-
-    if image_raw.shape[1] <= 256:
-        return chunked_rows.append(image_raw)
 
     for i in range(len(hor_lines)-1):
 
         row = image_raw[hor_lines[i]:hor_lines[i+1]]
-        row = Trim(Trim(row, vertical=False), vertical=True)
+        row = Trim(Trim(row, vertical=False), vertical=True, rowFiltering=True)
 
         _, ver_lines = Process(row, vertical=True)
         

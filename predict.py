@@ -57,7 +57,11 @@ def VisualizePredict(model, data):
     
     for chunked_row in data:
         pred_label = Predict(model, chunked_row)
-        pred_label[-1] += '\n'
+        if type(pred_label)==list:
+            pred_label[-1] += '\n'
+        elif type(pred_label)==str:
+            pred_label = [pred_label + '\n']
+
         all_data.append(chunked_row)
         all_pred_labels.append(pred_label)
 
@@ -66,15 +70,15 @@ def VisualizePredict(model, data):
 
     num_images = all_data.size(0)
     columns = 2 
-    rows = (num_images + 1) // columns  
+    rows = num_images//columns +1
 
-    fig = plt.figure(figsize=(rows//2, int(1.3 * rows)))
+    fig = plt.figure(figsize=(7, rows))
     
     for i in range(num_images):
     
         ax = fig.add_subplot(rows, columns, i + 1)
         ax.imshow(all_data[i].permute(1, 2, 0)) 
-        ax.set_xlabel('pred: ' + all_pred_labels[i], fontsize=7)  
+        ax.set_xlabel(all_pred_labels[i], fontsize=7)  
         ax.yaxis.set_visible(False) 
         ax.tick_params(left=False, right=False, labelleft=False, labelbottom=False, bottom=False) 
 
@@ -104,13 +108,10 @@ def TranscribeImage(image, visualise=False):
     for row in chunked_rows:
 
         tensor_chunks = []
-
         for chunk in row:
             
             chunk = Image.fromarray(chunk)
-
             chunk = transformator(chunk)
-
             tensor_chunks.append(chunk)
 
         tensor_chunks = torch.stack(tensor_chunks)
@@ -118,7 +119,6 @@ def TranscribeImage(image, visualise=False):
 
         if not visualise:
             predictions = Predict(model, tensor_chunks)
-
             text += ' '.join(predictions) + '\n'
 
     if visualise:
@@ -127,5 +127,5 @@ def TranscribeImage(image, visualise=False):
     # llm = 'Some llm'
 
     # text = llm.invoke(PROMPT+text).content.split('@')[0]
-    return text
+    return text, chunked_rows
 
